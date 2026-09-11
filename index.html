@@ -514,19 +514,21 @@
 
       } catch (error) {
 
-        console.error(error);
+            console.error("Camera start error:", error);
 
+            const errorText =
+                error && error.message
+                ? error.message
+                : String(error);
 
-        setStatus(
-          "Unable to start camera. Allow camera access and try again.",
-          "#d93025"
-        );
+            setStatus(
+                "Camera error: " + errorText,
+                "#d93025"
+            );
 
-
-        scanner = null;
-        cameraRunning = false;
-
-      }
+            scanner = null;
+            cameraRunning = false;
+            }
 
     }
 
