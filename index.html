@@ -251,49 +251,43 @@
     }
 
 
-    function extractBatteryCode(rawText) {
+function extractBatteryCode(rawText) {
 
-      let text =
-        String(rawText || "")
-          .trim()
-          .toUpperCase();
+    const raw =
+        String(rawText || "").trim();
 
-      if (!text) {
+    if (!raw) {
         return "";
-      }
+    }
 
-      /*
-       * QR code may contain either:
-       *
-       * ABC234
-       *
-       * or:
-       *
-       * https://.../exec?code=ABC234
-       */
+    /*
+    * QR can contain either:
+    *
+    * QPD9UE
+    *
+    * or a URL such as:
+    *
+    * https://.../exec?code=QPD9UE
+    */
 
-      try {
+    try {
 
-        const url = new URL(text);
+        const url = new URL(raw);
 
         const code =
-          url.searchParams.get("code");
+        url.searchParams.get("code");
 
         if (code) {
-
-          text =
-            code.trim().toUpperCase();
-
+        return code.trim().toUpperCase();
         }
 
-      } catch (error) {
+    } catch (error) {
 
-        // Raw battery code, not a URL.
+        // Not a URL. Continue as raw battery code.
 
-      }
+    }
 
-      return text;
-
+    return raw.toUpperCase();
     }
 
 
