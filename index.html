@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <title>Battery Warranty Scanner</title>
+
+  <script src="https://unpkg.com/html5-qrcode"></script>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f6f8;
+      margin: 0;
+      padding: 20px;
+    }
+
+    .card {
+      max-width: 480px;
+      margin: 20px auto;
+      background: white;
+      padding: 24px;
+      border-radius: 16px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    }
+
+    h2 {
+      text-align: center;
+      margin-top: 0;
+    }
+
+    label {
+      display: block;
+      margin-top: 16px;
+      font-weight: bold;
+    }
+
+    input,
+    textarea {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 12px;
+      margin-top: 8px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      font-size: 16px;
+    }
+
+    textarea {
+      min-height: 120px;
+    }
+
+    button {
+      width: 100%;
+      padding: 14px;
+      margin-top: 10px;
+      border: none;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    .blue {
+      background: #1a73e8;
+      color: white;
+    }
+
+    .green {
+      background: #188038;
+      color: white;
+    }
+
+    .red {
+      background: #d93025;
+      color: white;
+    }
+
+    .gray {
+      background: #5f6368;
+      color: white;
+    }
+
+    #reader {
+      width: 100%;
+      margin-top: 14px;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    #status {
+      min-height: 22px;
+      margin-top: 12px;
+      text-align: center;
+      font-weight: bold;
+      font-size: 14px;
+    }
+
+    .count {
+      margin-top: 8px;
+      text-align: center;
+      color: #555;
+      font-size: 14px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="card">
+
+    <h2>Battery Warranty Scanner</h2>
+
+    <button
+      id="startButton"
+      class="blue"
+      onclick="startCamera()"
+    >
+      Scan QR Code
+    </button>
+
+    <button
+      id="stopButton"
+      class="gray"
+      onclick="stopCamera()"
+      style="display:none;"
+    >
+      Stop Camera
+    </button>
+
+    <div id="reader"></div>
+
+    <div id="status"></div>
+
+    <label>Battery Code</label>
+
+    <input
+      id="code"
+      placeholder="Enter, paste, or scan code"
+      autocomplete="off"
+      autocapitalize="characters"
+    >
+
+    <button
+      class="blue"
+      onclick="addManualCode()"
+    >
+      Add to Scan List
+    </button>
+
+    <label>Scanned Codes</label>
+
+    <textarea
+      id="scanList"
+      readonly
+    ></textarea>
+
+    <div
+      id="count"
+      class="count"
+    >
+      0 codes scanned
+    </div>
+
+    <button
+      class="green"
+      onclick="copyList()"
+    >
+      Copy List
+    </button>
+
+    <button
+      class="red"
+      onclick="clearList()"
+    >
+      Clear List
+    </button>
+
+  </div>
+
+
+  <script>
+
+    const STORAGE_KEY =
+      "battery_warranty_scanner_codes";
+
+    let scanner = null;
+    let cameraRunning = false;
+
+    let lastDecodedText = "";
+    let lastDecodedTime = 0;
+
+
+    function getScans() {
+
+      try {
+
+        return JSON.parse(
+          localStorage.getItem(STORAGE_KEY) || "[]"
+        );
+
+      } catch (error) {
+
+        return [];
+
+      }
+
+    }
+
+
+    function saveScans(scans) {
+
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify(scans)
+      );
+
+    }
+
+
+    function renderScans() {
+
+      const scans = getScans();
+
+      document.getElementById("scanList").value =
+        scans.length
+          ? "<" + scans.join("><") + ">"
+          : "";
+
+      document.getElementById("count").textContent =
+        scans.length +
+        (scans.length === 1
+          ? " code scanned"
+          : " codes scanned");
+
+    }
+
+
+    function setStatus(message, color) {
+
+      const status =
+        document.getElementById("status");
+
+      status.textContent = message || "";
+      status.style.color = color || "#333";
+
+    }
+
+
+    function extractBatteryCode(rawText) {
+
+      let text =
+        String(rawText || "")
+          .trim()
+          .toUpperCase();
+
+      if (!text) {
+        return "";
+      }
+
+      /*
+       * QR code may contain either:
+       *
+       * ABC234
+       *
+       * or:
+       *
+       * https://.../exec?code=ABC234
+       */
+
+      try {
+
+        const url = new URL(text);
+
+        const code =
+          url.searchParams.get("code");
+
+        if (code) {
+
+          text =
+            code.trim().toUpperCase();
+
+        }
+
+      } catch (error) {
+
+        // Raw battery code, not a URL.
+
+      }
+
+      return text;
+
+    }
+
+
+    function isValidBatteryCode(code) {
+
+      /*
+       * 6-character battery code.
+       *
+       * Allowed characters intentionally exclude:
+       * I, O, 0, 1
+       */
+
+      return /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/.test(code);
+
+    }
+
+
+    function addCode(rawCode) {
+
+      const code =
+        extractBatteryCode(rawCode);
+
+      if (!code) {
+
+        setStatus(
+          "No battery code detected.",
+          "#d93025"
+        );
+
+        return false;
+
+      }
+
+
+      if (!isValidBatteryCode(code)) {
+
+        setStatus(
+          "QR detected, but it is not a valid battery code.",
+          "#d93025"
+        );
+
+        return false;
+
+      }
+
+
+      const scans =
+        getScans();
+
+
+      document.getElementById("code").value =
+        code;
+
+
+      if (scans.includes(code)) {
+
+        setStatus(
+          code + " is already in the list.",
+          "#b06000"
+        );
+
+        return false;
+
+      }
+
+
+      scans.push(code);
+
+      saveScans(scans);
+
+      renderScans();
+
+
+      setStatus(
+        "Added " + code + ".",
+        "#188038"
+      );
+
+
+      /*
+       * Optional vibration feedback on phones.
+       */
+
+      if (navigator.vibrate) {
+
+        navigator.vibrate(100);
+
+      }
+
+
+      return true;
+
+    }
+
+
+    function addManualCode() {
+
+      const input =
+        document.getElementById("code");
+
+      const added =
+        addCode(input.value);
+
+      if (added) {
+
+        input.value = "";
+        input.focus();
+
+      }
+
+    }
+
+
+    function onScanSuccess(decodedText) {
+
+      const now =
+        Date.now();
+
+
+      /*
+       * Camera can decode the same QR many
+       * times per second.
+       */
+
+      if (
+        decodedText === lastDecodedText &&
+        now - lastDecodedTime < 1500
+      ) {
+
+        return;
+
+      }
+
+
+      lastDecodedText =
+        decodedText;
+
+      lastDecodedTime =
+        now;
+
+
+      addCode(decodedText);
+
+    }
+
+
+    function onScanFailure() {
+
+      /*
+       * Normal while camera searches.
+       * No message required.
+       */
+
+    }
+
+
+    async function startCamera() {
+
+      if (cameraRunning) {
+        return;
+      }
+
+
+      setStatus(
+        "Starting camera...",
+        "#333"
+      );
+
+
+      try {
+
+        scanner =
+          new Html5Qrcode("reader");
+
+
+        await scanner.start(
+
+          {
+            facingMode: {
+              ideal: "environment"
+            }
+          },
+
+          {
+            fps: 10,
+
+            qrbox: {
+              width: 250,
+              height: 250
+            }
+          },
+
+          onScanSuccess,
+
+          onScanFailure
+
+        );
+
+
+        cameraRunning = true;
+
+
+        document.getElementById(
+          "startButton"
+        ).style.display = "none";
+
+
+        document.getElementById(
+          "stopButton"
+        ).style.display = "block";
+
+
+        setStatus(
+          "Camera ready — scan battery QR codes.",
+          "#188038"
+        );
+
+
+      } catch (error) {
+
+        console.error(error);
+
+
+        setStatus(
+          "Unable to start camera. Allow camera access and try again.",
+          "#d93025"
+        );
+
+
+        scanner = null;
+        cameraRunning = false;
+
+      }
+
+    }
+
+
+    async function stopCamera() {
+
+      if (
+        !scanner ||
+        !cameraRunning
+      ) {
+
+        return;
+
+      }
+
+
+      try {
+
+        await scanner.stop();
+
+        await scanner.clear();
+
+      } catch (error) {
+
+        console.error(error);
+
+      }
+
+
+      scanner = null;
+      cameraRunning = false;
+
+
+      document.getElementById(
+        "startButton"
+      ).style.display = "block";
+
+
+      document.getElementById(
+        "stopButton"
+      ).style.display = "none";
+
+
+      setStatus(
+        "Camera stopped.",
+        "#666"
+      );
+
+    }
+
+
+    async function copyList() {
+
+      const text =
+        document.getElementById(
+          "scanList"
+        ).value;
+
+
+      if (!text) {
+
+        alert(
+          "No codes to copy."
+        );
+
+        return;
+
+      }
+
+
+      try {
+
+        await navigator.clipboard.writeText(text);
+
+        setStatus(
+          "Scan list copied.",
+          "#188038"
+        );
+
+
+      } catch (error) {
+
+        document.getElementById(
+          "scanList"
+        ).select();
+
+        document.execCommand("copy");
+
+        setStatus(
+          "Scan list copied.",
+          "#188038"
+        );
+
+      }
+
+    }
+
+
+    function clearList() {
+
+      if (
+        !confirm(
+          "Clear all scanned codes?"
+        )
+      ) {
+
+        return;
+
+      }
+
+
+      localStorage.removeItem(
+        STORAGE_KEY
+      );
+
+
+      document.getElementById(
+        "code"
+      ).value = "";
+
+
+      renderScans();
+
+
+      setStatus(
+        "Scan list cleared.",
+        "#666"
+      );
+
+    }
+
+
+    renderScans();
+
+  </script>
+
+</body>
+</html>
